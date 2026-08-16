@@ -20,6 +20,8 @@ from parse_job_ITviec import parse_partition
 run_date = datetime.now(timezone.utc).strftime("%Y-%m-%d")
 output_path = f"s3a://silver/ITViec/{run_date}"
 
+present=datetime.now()
+
 spark = (
     SparkSession.builder
     .appName("CareerSignal")
@@ -132,7 +134,7 @@ parsed_schema = StructType([
     StructField("parse_status", StringType(), False),
     ])
 
-data=spark.read.parquet("s3a://bronze/2026-7-30/1785403101.108542-ITViec.parquet")
+data=spark.read.parquet(f"s3a://bronze/itviec/{present.year}-{present.month}-{present.day}/")
 
 data_salary=data.select("job_id","salary")
 

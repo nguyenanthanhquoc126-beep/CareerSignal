@@ -16,8 +16,8 @@ load_dotenv(BASE_DIR / ".env")
 
 present=datetime.now()
 
-object_nameITViec=f"{present.year}-{present.month}-{present.day}/{present.timestamp()}-ITViec.parquet"
-object_nameTopCV=f"{present.year}-{present.month}-{present.day}/{present.timestamp()}-TopCV.parquet"
+object_nameITViec=f"itviec/{present.year}-{present.month}-{present.day}/{present.timestamp()}-ITViec.parquet"
+object_nameTopCV=f"topcv/{present.year}-{present.month}-{present.day}/{present.timestamp()}-TopCV.parquet"
 
 
 s3_client=boto3.client(

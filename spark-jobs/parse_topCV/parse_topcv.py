@@ -20,20 +20,37 @@ from parse_job_topCV import parse_partition
 
 
 run_date = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-output_path = f"s3a://silver/topcv/{run_date}"
+present=datetime.now()
+
 
 spark = (
     SparkSession.builder
     .appName("CareerSignal")
-    # THƯ VIỆN ĐỂ SPARK ĐỌC S3/MINIO
+
+    # =========================================================
+    # THƯ VIỆN
+    # =========================================================
     .config(
         "spark.jars.packages",
         (
+            # Spark đọc/ghi MinIO bằng S3A
             "org.apache.hadoop:hadoop-aws:3.3.4,"
-            "com.amazonaws:aws-java-sdk-bundle:1.12.262"
+            "com.amazonaws:aws-java-sdk-bundle:1.12.262,"
+
+            # Spark + Iceberg + Nessie Catalog
+            "org.apache.iceberg:iceberg-spark-runtime-3.5_2.12:1.5.0"
         ),
     )
-    # CẤU HÌNH MINIO
+
+    # Cho phép Spark SQL dùng MERGE / UPDATE / DELETE của Iceberg
+    .config(
+        "spark.sql.extensions",
+        "org.apache.iceberg.spark.extensions.IcebergSparkSessionExtensions",
+    )
+
+    # =========================================================
+    # MINIO
+    # =========================================================
     .config(
         "spark.hadoop.fs.s3a.endpoint",
         "http://minio:9000",
@@ -62,6 +79,52 @@ spark = (
         "spark.hadoop.fs.s3a.endpoint.region",
         "us-east-1",
     )
+
+    # =========================================================
+    # NESSIE / ICEBERG CATALOG
+    # =========================================================
+
+    # Tạo catalog tên "nessie"
+    .config(
+        "spark.sql.catalog.nessie",
+        "org.apache.iceberg.spark.SparkCatalog",
+    )
+
+    # Catalog nessie sử dụng NessieCatalog
+    .config(
+        "spark.sql.catalog.nessie.catalog-impl",
+        "org.apache.iceberg.nessie.NessieCatalog",
+    )
+
+    # Địa chỉ Nessie Server
+    .config(
+        "spark.sql.catalog.nessie.uri",
+        "http://nessie:19120/api/v1",
+    )
+
+    # Branch mặc định
+    .config(
+        "spark.sql.catalog.nessie.ref",
+        "main",
+    )
+
+    # Local Nessie không authentication
+    .config(
+        "spark.sql.catalog.nessie.authentication.type",
+        "NONE",
+    )
+
+    # Root storage của các Iceberg table
+    .config(
+        "spark.sql.catalog.nessie.warehouse",
+        "s3a://warehouse/",
+    )
+
+    # Iceberg dùng Hadoop/S3A để đọc ghi MinIO
+    .config(
+        "spark.sql.catalog.nessie.io-impl",
+        "org.apache.iceberg.hadoop.HadoopFileIO",
+    )
     .getOrCreate()
 )
 parsed_schema = StructType([
@@ -85,14 +148,21 @@ parsed_schema = StructType([
     StructField("parse_error", StringType(), True),
 ])
 data=spark.read.parquet(
-    "s3a://bronze/2026-7-30/1785403101.108542-TopCV.parquet"
+    f"s3a://bronze/topcv/{present.year}-{present.month}-{present.day}/"
 )
 
-data = data.withColumn(
-    "salary_parsed",
-    apply_salary_parser(
-        F.col("salary")
-    ),
+data = (
+    data
+    .withColumn(
+        "job_id",
+        F.col("job_id").cast("string")
+    )
+    .withColumn(
+        "salary_parsed",
+        apply_salary_parser(
+            F.col("salary")
+        )
+    )
 )
 data = (
     data
@@ -152,17 +222,68 @@ data_to_join=data.select(
     "salary_parse_error",
     "scraped_at"
 )
+
 data_final=data_to_join.join(
     parsed_df,
     on="job_id",
     how="inner"
 )
+data_final = data_final.withColumn(
+    "scraped_at",
+    F.to_timestamp("scraped_at")
+)
+data_final.createOrReplaceTempView("topcv_newjobs")
+spark.sql("CREATE NAMESPACE IF NOT EXISTS nessie.silver;")
 
-data_final.write \
-    .mode("overwrite") \
-    .option("compression", "snappy") \
-    .format("parquet") \
-    .save(output_path) 
+
+spark.sql("""
+    CREATE TABLE IF NOT EXISTS nessie.silver.topcv (
+        job_id STRING,
+        job_url STRING,
+        title STRING,
+        city STRING,
+        company_name STRING,
+        apply_url STRING,
+        verification_level STRING,
+
+        salary_min DOUBLE,
+        salary_max DOUBLE,
+        salary_currency STRING,
+        salary_period STRING,
+        salary_parse_error STRING,
+
+        scraped_at TIMESTAMP,
+
+        role_group STRING,
+        primary_role STRING,
+        secondary_roles ARRAY<STRING>,
+
+        seniority STRING,
+        experience_years DOUBLE,
+        skills ARRAY<STRING>,
+        is_multi_role BOOLEAN,
+
+        parse_status STRING,
+        parse_error STRING
+    )
+    USING iceberg
+    LOCATION 's3a://warehouse/silver/topcv'
+    TBLPROPERTIES (
+        'write.format.default' = 'parquet'
+    );
+""")
+
+spark.sql("""
+    MERGE INTO nessie.silver.topcv AS target
+    USING topcv_newjobs AS source
+    ON target.job_id = source.job_id
+
+    WHEN MATCHED THEN
+        UPDATE SET *
+
+    WHEN NOT MATCHED THEN
+        INSERT *
+""")
 
 
 spark.stop()
