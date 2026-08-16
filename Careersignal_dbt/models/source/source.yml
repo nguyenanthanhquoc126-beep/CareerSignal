@@ -1,0 +1,9 @@
+version: 2
+
+sources:
+    - name: source
+      database: nessie
+      schema: silver
+      tables:
+        - name: itviec
+        - name: topcv 

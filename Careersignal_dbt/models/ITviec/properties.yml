@@ -1,0 +1,12 @@
+version: 2
+
+models:
+  - name: dataenginerr_career_in_itviec
+    config:
+      materialized: table
+      alias: career_data_engineer
+  - name: Most_skill_in_DE
+    config:
+      materialized: table
+      alias: skil_DE_need
+

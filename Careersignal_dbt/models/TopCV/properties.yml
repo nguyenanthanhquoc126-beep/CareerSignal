@@ -1,0 +1,28 @@
+version: 2
+
+models:
+  - name: hiring_seniority
+    config:
+      materialized: table
+      alias: hiring_seniority
+
+  - name: Luong_trung_binh_IT
+    config:
+      materialized: table
+      alias: Luong_trung_binh_IT
+
+  - name: phan_bo_viec_lam
+    config:
+      materialized: table
+      alias: phan_bo_viec_lam
+
+  - name: TheMostCVinData
+    config:
+      materialized: table
+      alias: TheMostCVinData
+
+  - name: Trend_hiring
+    config:
+      materialized: table
+      alias: Trend_hiring
+
