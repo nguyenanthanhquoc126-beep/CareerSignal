@@ -8,6 +8,7 @@ from pathlib import Path
 from urllib.parse import parse_qs, urlencode, urljoin, urlsplit, urlunsplit
 
 from bs4 import BeautifulSoup, Tag
+from logging_config import logging, set_up_log
 from playwright.sync_api import (
     BrowserContext,
     Locator,
@@ -15,6 +16,8 @@ from playwright.sync_api import (
     TimeoutError as PlaywrightTimeoutError,
     sync_playwright,
 )
+
+set_up_log()
 
 
 HOME_URL = "https://itviec.com/"
@@ -89,6 +92,10 @@ def get_required_env(*names: str) -> str:
             return value
 
     expected_names = ", ".join(names)
+    logging.error(
+        "[ITViec] Thiếu biến môi trường bắt buộc; cần một trong: %s.",
+        expected_names,
+    )
     raise RuntimeError(
         f"Chua cau hinh bien moi truong. Can mot trong cac bien: "
         f"{expected_names}."
@@ -279,9 +286,15 @@ def request_search_page(
                 pass
 
         retry_delay = min(retry_delay, MAX_RETRY_DELAY_SECONDS)
-        print(
-            f"Trang {page_number} tra HTTP {response.status}. "
-            f"Thu lai lan {attempt + 1} sau {retry_delay} giay."
+        logging.info(
+            "[ITViec] Trang %s trả HTTP %s; sẽ thử lại lần %s/%s "
+            "sau %s giây. URL=%s",
+            page_number,
+            response.status,
+            attempt + 1,
+            MAX_REQUEST_ATTEMPTS,
+            retry_delay,
+            build_search_url(page_number),
         )
         time.sleep(retry_delay)
 
@@ -434,6 +447,12 @@ def career_it_hcm(page: int | None = None) -> dict[str, dict[str, object]]:
 
     page_limit = page
 
+    logging.info(
+        "[ITViec] Bắt đầu crawl việc làm từ %s; giới hạn trang=%s.",
+        SEARCH_URL,
+        "toàn bộ" if page_limit is None else page_limit,
+    )
+
     load_local_env()
     user_name = get_required_env("USER_NAME", "user_name")
     password = get_required_env("PASS_WORD", "passwword", "password")
@@ -446,10 +465,18 @@ def career_it_hcm(page: int | None = None) -> dict[str, dict[str, object]]:
         page = context.new_page()
 
         try:
+            logging.info("[ITViec] Đang đăng nhập tại %s.", HOME_URL)
             sign_in(page, user_name, password)
-            print(f"Dang nhap ITviec thanh cong. Trang da tai xong: {page.url}")
+            logging.info(
+                "[ITViec] Đăng nhập thành công; trang hiện tại=%s.",
+                page.url,
+            )
             headers = get_ajax_headers(page)
 
+            logging.info(
+                "[ITViec] Đang crawl trang 1/chưa xác định tổng số trang. URL=%s",
+                build_search_url(1),
+            )
             first_page_data = request_search_page(context, headers, 1)
             total_pages = get_total_pages(first_page_data["pagination_html"])
             last_page = (
@@ -457,10 +484,22 @@ def career_it_hcm(page: int | None = None) -> dict[str, dict[str, object]]:
                 if page_limit is None
                 else min(page_limit, total_pages)
             )
-            print(f"Tong so trang: {total_pages}")
-            print(f"So trang se cao: {last_page}")
+            logging.info(
+                "[ITViec] Kế hoạch crawl: %s/%s trang của %s.",
+                last_page,
+                total_pages,
+                SEARCH_URL,
+            )
 
             for page_number in range(1, last_page + 1):
+                if page_number > 1:
+                    logging.info(
+                        "[ITViec] Đang crawl trang %s/%s. URL=%s",
+                        page_number,
+                        last_page,
+                        build_search_url(page_number),
+                    )
+
                 response_data = (
                     first_page_data
                     if page_number == 1
@@ -478,13 +517,23 @@ def career_it_hcm(page: int | None = None) -> dict[str, dict[str, object]]:
                     if unique_key:
                         all_jobs[unique_key] = job
 
-                print(
-                    f"Trang {page_number}/{last_page}: "
-                    f"lay duoc {len(page_jobs)} job"
+                logging.info(
+                    "[ITViec] Hoàn tất trang %s/%s: lấy được %s job; "
+                    "tổng job không trùng hiện tại=%s.",
+                    page_number,
+                    last_page,
+                    len(page_jobs),
+                    len(all_jobs),
                 )
 
                 if page_number < last_page:
                     page.wait_for_timeout(REQUEST_DELAY_MS)
+            logging.info(
+                "[ITViec] Hoàn tất crawl %s/%s trang: %s job không trùng.",
+                last_page,
+                total_pages,
+                len(all_jobs),
+            )
         finally:
             browser.close()
 
@@ -496,6 +545,12 @@ def to_csv(
     output_file: str | Path = OUTPUT_FILE,
 ) -> None:
     """Write the dictionary returned by career_it_hcm to a UTF-8 CSV."""
+
+    logging.info(
+        "[ITViec] Đang lưu %s job vào file CSV: %s.",
+        len(jobs),
+        output_file,
+    )
 
     with Path(output_file).open("w", newline="", encoding="utf-8-sig") as csv_file:
         writer = csv.DictWriter(
@@ -514,8 +569,18 @@ def to_csv(
             )
             writer.writerow(row)
 
+    logging.info(
+        "[ITViec] Đã lưu %s job vào file CSV: %s.",
+        len(jobs),
+        output_file,
+    )
+
 
 if __name__ == "__main__":
     itviec_jobs = career_it_hcm()
     to_csv(itviec_jobs, OUTPUT_FILE)
-    print(f"Da luu {len(itviec_jobs)} job vao {OUTPUT_FILE}")
+    logging.info(
+        "[ITViec] Chương trình độc lập hoàn tất: %s job, file=%s.",
+        len(itviec_jobs),
+        OUTPUT_FILE,
+    )

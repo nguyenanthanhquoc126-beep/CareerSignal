@@ -15,12 +15,28 @@ from pyspark.sql import Row
 from pyspark.sql import SparkSession
 from pyspark.sql import functions as F
 import os
-from parse_salary_TOPCV import apply_salary_parser
+from logging_config import logging, set_up_log
+from parse_salary_TOPCV import PARSER_VERSION, apply_salary_parser
 from parse_job_topCV import parse_partition
 
+LOG_COMPONENT = "[Spark][TopCV][driver]"
+set_up_log()
 
 run_date = datetime.now(timezone.utc).strftime("%Y-%m-%d")
 present=datetime.now()
+
+logging.info(
+    "%s Bắt đầu job chuyển dữ liệu Bronze sang Silver | "
+    "run_date=%s | source=%s | target_table=%s | target_location=%s | "
+    "ollama_partitions=%s | salary_parser=%s.",
+    LOG_COMPONENT,
+    run_date,
+    f"s3a://bronze/topcv/{present.year}-{present.month}-{present.day}/",
+    "nessie.silver.topcv",
+    "s3a://warehouse/silver/topcv",
+    8,
+    PARSER_VERSION,
+)
 
 
 spark = (
@@ -127,6 +143,14 @@ spark = (
     )
     .getOrCreate()
 )
+logging.info(
+    "%s SparkSession đã sẵn sàng | app_name=%s | master=%s | "
+    "application_id=%s.",
+    LOG_COMPONENT,
+    spark.sparkContext.appName,
+    spark.sparkContext.master,
+    spark.sparkContext.applicationId,
+)
 parsed_schema = StructType([
     StructField("job_id", StringType(), False),
     StructField("role_group", StringType(), True),
@@ -147,8 +171,19 @@ parsed_schema = StructType([
     StructField("parse_status", StringType(), False),
     StructField("parse_error", StringType(), True),
 ])
+logging.info(
+    "%s Bắt đầu tạo DataFrame nguồn từ Bronze | source=%s.",
+    LOG_COMPONENT,
+    f"s3a://bronze/topcv/{present.year}-{present.month}-{present.day}/",
+)
 data=spark.read.parquet(
     f"s3a://bronze/topcv/{present.year}-{present.month}-{present.day}/"
+)
+logging.info(
+    "%s Đã tạo DataFrame nguồn từ Bronze theo cơ chế lazy của Spark | "
+    "columns=%s.",
+    LOG_COMPONENT,
+    ",".join(data.columns),
 )
 
 data = (
@@ -194,6 +229,12 @@ data = (
     })
     .drop("salary_parsed")
 )
+logging.info(
+    "%s Đã cấu hình salary parser | parser=%s | "
+    "kết quả lỗi nghiệp vụ được lưu trong salary_parse_error.",
+    LOG_COMPONENT,
+    PARSER_VERSION,
+)
 data_new=data.select(
     "job_id",
     "title",
@@ -207,6 +248,12 @@ parsed_df = spark.createDataFrame(
     schema=parsed_schema,
 )
 parsed_df.cache()
+logging.info(
+    "%s Đã cấu hình bước phân loại role, seniority và skills bằng Ollama | "
+    "partitions=%s | cache=lazy | lỗi từng job được lưu trong parse_error.",
+    LOG_COMPONENT,
+    8,
+)
 data_to_join=data.select(
     "job_id",
     "job_url",
@@ -228,14 +275,33 @@ data_final=data_to_join.join(
     on="job_id",
     how="inner"
 )
+logging.info(
+    "%s Đã cấu hình phép join dữ liệu đã parse với dữ liệu job | key=job_id | "
+    "join_type=inner.",
+    LOG_COMPONENT,
+)
 data_final = data_final.withColumn(
     "scraped_at",
     F.to_timestamp("scraped_at")
 )
 data_final.createOrReplaceTempView("topcv_newjobs")
+logging.info(
+    "%s Đang bảo đảm namespace Iceberg tồn tại | namespace=nessie.silver.",
+    LOG_COMPONENT,
+)
 spark.sql("CREATE NAMESPACE IF NOT EXISTS nessie.silver;")
+logging.info(
+    "%s Namespace Iceberg đã sẵn sàng | namespace=nessie.silver.",
+    LOG_COMPONENT,
+)
 
 
+logging.info(
+    "%s Đang bảo đảm bảng Iceberg tồn tại | table=%s | location=%s.",
+    LOG_COMPONENT,
+    "nessie.silver.topcv",
+    "s3a://warehouse/silver/topcv",
+)
 spark.sql("""
     CREATE TABLE IF NOT EXISTS nessie.silver.topcv (
         job_id STRING,
@@ -272,7 +338,19 @@ spark.sql("""
         'write.format.default' = 'parquet'
     );
 """)
+logging.info(
+    "%s Bảng Iceberg đã sẵn sàng | table=%s | location=%s.",
+    LOG_COMPONENT,
+    "nessie.silver.topcv",
+    "s3a://warehouse/silver/topcv",
+)
 
+logging.info(
+    "%s Bắt đầu MERGE dữ liệu vào Silver | source_view=topcv_newjobs | "
+    "target_table=%s | key=job_id.",
+    LOG_COMPONENT,
+    "nessie.silver.topcv",
+)
 spark.sql("""
     MERGE INTO nessie.silver.topcv AS target
     USING topcv_newjobs AS source
@@ -284,6 +362,13 @@ spark.sql("""
     WHEN NOT MATCHED THEN
         INSERT *
 """)
+logging.info(
+    "%s MERGE dữ liệu Silver hoàn tất | target_table=%s | key=job_id.",
+    LOG_COMPONENT,
+    "nessie.silver.topcv",
+)
 
 
+logging.info("%s Đang dừng SparkSession sau khi job hoàn tất.", LOG_COMPONENT)
 spark.stop()
+logging.info("%s Đã dừng SparkSession; job kết thúc thành công.", LOG_COMPONENT)

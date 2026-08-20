@@ -9,7 +9,10 @@ from botocore.config import Config
 from boto3.s3.transfer import TransferConfig
 import tempfile
 from dotenv import load_dotenv
+from logging_config import logging, set_up_log
 from pathlib import Path
+
+set_up_log()
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 load_dotenv(BASE_DIR / ".env")
@@ -40,8 +43,13 @@ def bucket_exist(s3_client,bucket_name):
     ]
     return bucket_name in buckets_name
 
+logging.info("[MinIO] Đang kiểm tra bucket bronze.")
 if not bucket_exist(s3_client=s3_client,bucket_name="bronze"):
+    logging.info("[MinIO] Bucket bronze chưa tồn tại; đang tạo bucket.")
     s3_client.create_bucket(Bucket='bronze')
+    logging.info("[MinIO] Đã tạo bucket bronze.")
+else:
+    logging.info("[MinIO] Bucket bronze đã tồn tại.")
 
 
 transfer_config = TransferConfig(
@@ -51,6 +59,15 @@ transfer_config = TransferConfig(
 
 
 def upload_dataframe(dataframe: pd.DataFrame, bucket: str, object_name: str):
+    logging.info(
+        "[MinIO] Đang chuyển %s dòng, %s cột thành Parquet và upload tới "
+        "s3://%s/%s.",
+        len(dataframe),
+        len(dataframe.columns),
+        bucket,
+        object_name,
+    )
+
     with tempfile.NamedTemporaryFile(suffix=".parquet") as temp_file:
         dataframe.to_parquet(
             temp_file.name,
@@ -66,11 +83,33 @@ def upload_dataframe(dataframe: pd.DataFrame, bucket: str, object_name: str):
             },
             Config=transfer_config,
         )
+
+    logging.info(
+        "[MinIO] Đã upload thành công %s dòng tới s3://%s/%s.",
+        len(dataframe),
+        bucket,
+        object_name,
+    )
+
+
 if __name__ == "__main__":
+    logging.info("[Pipeline] Bắt đầu pipeline ingestion.")
+
+    logging.info("[Pipeline] Bắt đầu crawl ITViec.")
     it_viec=career_it_hcm(page=999)
+    logging.info(
+        "[Pipeline] Crawl ITViec hoàn tất: %s job.",
+        len(it_viec),
+    )
+
+    logging.info("[Pipeline] Bắt đầu crawl TopCV.")
     topcv_job = career_it(page=999)
+    logging.info("[Pipeline] TopCV trả về %s job đã xử lý.", len(topcv_job))
+
     df_itviet=pd.DataFrame(it_viec.values())
     df_topcv=pd.DataFrame(topcv_job)
 
     upload_dataframe(dataframe=df_itviet,bucket="bronze",object_name=object_nameITViec)
     upload_dataframe(dataframe=df_topcv,bucket='bronze',object_name=object_nameTopCV)
+
+    logging.info("[Pipeline] Kết thúc pipeline ingestion.")

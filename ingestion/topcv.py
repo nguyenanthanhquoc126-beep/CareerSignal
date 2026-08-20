@@ -1,7 +1,6 @@
 import csv
 import json
 import re
-import traceback
 from datetime import datetime
 from urllib.parse import (
     parse_qs,
@@ -13,12 +12,15 @@ from urllib.parse import (
 )
 
 from bs4 import BeautifulSoup
+from logging_config import logging, set_up_log
 from playwright.sync_api import (
     Locator,
     Page,
     TimeoutError as PlaywrightTimeoutError,
     sync_playwright,
 )
+
+set_up_log()
 
 
 # ============================================================
@@ -80,7 +82,7 @@ def accept_cookie_banner(page: Page) -> None:
 
         if button.is_visible():
             button.click()
-            print("Da dong thong bao cookie")
+            logging.info("[TopCV] Đã đóng thông báo cookie.")
             return
 
 
@@ -1054,6 +1056,13 @@ def career_it(page: int | None = None) -> list[dict[str, object]]:
 
     page_limit = page
 
+    logging.info(
+        "[TopCV] Bắt đầu crawl việc làm từ %s%s; giới hạn trang=%s.",
+        HOME_URL.rstrip("/"),
+        IT_SEARCH_PATH,
+        "toàn bộ" if page_limit is None else page_limit,
+    )
+
     career: list[dict[str, object]] = []
     all_jobs: dict[str, dict[str, object]] = {}
 
@@ -1082,7 +1091,10 @@ def career_it(page: int | None = None) -> list[dict[str, object]]:
 
             accept_cookie_banner(page)
 
-            print("Đã mở trang chủ TopCV")
+            logging.info(
+                "[TopCV] Đã mở trang chủ: %s.",
+                page.url,
+            )
 
             # ------------------------------------------------
             # 11.2. Hover menu “Việc làm”
@@ -1098,7 +1110,7 @@ def career_it(page: int | None = None) -> list[dict[str, object]]:
 
             job_menu.hover()
 
-            print("Đã mở menu Việc làm")
+            logging.info("[TopCV] Đã mở menu Việc làm.")
 
             # ------------------------------------------------
             # 11.3. Tìm link “Việc làm IT”
@@ -1153,33 +1165,34 @@ def career_it(page: int | None = None) -> list[dict[str, object]]:
             )
 
             # This request shares cookies with the browser context.
+            logging.info(
+                "[TopCV] Đang crawl trang 1/chưa xác định tổng số trang. URL=%s",
+                first_request_url,
+            )
             first_response = context.request.post(
                 first_request_url,
                 headers=reusable_headers,
                 timeout=TIMEOUT,
             )
 
-            print("Đã vào trang Việc làm IT")
-            print("URL giao diện:", page.url)
-
-            print(
-                "Status response đầu:",
+            logging.info(
+                "[TopCV] Đã vào trang Việc làm IT: giao diện=%s; "
+                "response API trang 1 có HTTP %s.",
+                page.url,
                 first_response.status,
             )
-
-            print("URL POST API trang 1:")
-            print(first_request_url)
 
             # ------------------------------------------------
             # 11.5. Kiểm tra response đầu
             # ------------------------------------------------
 
             if not first_response.ok:
-                print(
-                    "Request ngành IT thất bại:"
-                )
-                print(
-                    first_response.text()[:500]
+                logging.error(
+                    "[TopCV] Crawl trang 1 thất bại: HTTP %s, URL=%s, "
+                    "response=%r.",
+                    first_response.status,
+                    first_request_url,
+                    first_response.text()[:500],
                 )
                 return career
 
@@ -1189,12 +1202,14 @@ def career_it(page: int | None = None) -> list[dict[str, object]]:
                 )
 
             except Exception as error:
-                print(
-                    "Response đầu không phải JSON:"
-                )
-                print(error)
-                print(
-                    first_response.text()[:500]
+                logging.error(
+                    "[TopCV] Không thể đọc JSON trang 1: %s. "
+                    "HTTP %s, URL=%s, response=%r.",
+                    error,
+                    first_response.status,
+                    first_request_url,
+                    first_response.text()[:500],
+                    exc_info=True,
                 )
                 return career
 
@@ -1221,23 +1236,12 @@ def career_it(page: int | None = None) -> list[dict[str, object]]:
                     f"current_page={current_page}."
                 )
 
-            print(
-                "Tổng số công việc:",
-                total_jobs,
-            )
-
-            print(
-                "Tổng số trang trong JSON:",
-                total_pages,
-            )
-
-            print(
-                "Số trang sẽ cào:",
+            logging.info(
+                "[TopCV] Kế hoạch crawl: %s/%s trang, tổng %s việc làm; "
+                "JSON hiện tại là trang %s.",
                 last_page,
-            )
-
-            print(
-                "Trang hiện tại trong JSON:",
+                total_pages,
+                total_jobs,
                 current_page,
             )
 
@@ -1248,9 +1252,10 @@ def career_it(page: int | None = None) -> list[dict[str, object]]:
                 get_total_pages_from_dom(page)
             )
 
-            print(
-                "Tổng số trang trên giao diện:",
+            logging.info(
+                "[TopCV] Đối chiếu phân trang: giao diện=%s, JSON=%s.",
                 dom_total_pages,
+                total_pages,
             )
 
             # Nếu đọc được DOM thì hai số phải giống nhau.
@@ -1275,11 +1280,6 @@ def career_it(page: int | None = None) -> list[dict[str, object]]:
                 first_data
             )
 
-            print(
-                "Số job trong response đầu:",
-                len(first_page_jobs),
-            )
-
             scraped_at = datetime.now().isoformat(
                 timespec="seconds"
             )
@@ -1298,16 +1298,23 @@ def career_it(page: int | None = None) -> list[dict[str, object]]:
                         job
                     )
 
+            logging.info(
+                "[TopCV] Hoàn tất trang 1/%s: HTTP %s, lấy được %s job; "
+                "tổng job không trùng hiện tại=%s.",
+                last_page,
+                first_response.status,
+                len(first_page_jobs),
+                len(all_jobs),
+            )
+
             # ------------------------------------------------
             # 11.7. Lấy header và URL từ request thật
             # ------------------------------------------------
 
-            print(
-                "Các header sẽ được tái sử dụng:"
+            logging.info(
+                "[TopCV] Các header dùng lại cho API: %s.",
+                ", ".join(reusable_headers),
             )
-
-            for header_name in reusable_headers:
-                print("-", header_name)
 
             # ------------------------------------------------
             # 11.8. Lấy trang 2 đến giới hạn đã yêu cầu
@@ -1322,12 +1329,12 @@ def career_it(page: int | None = None) -> list[dict[str, object]]:
                     page_number,
                 )
 
-                print()
-                print(
-                    f"Đang lấy trang "
-                    f"{page_number}/{last_page}"
+                logging.info(
+                    "[TopCV] Đang crawl trang %s/%s. URL=%s",
+                    page_number,
+                    last_page,
+                    page_url,
                 )
-                print("URL:", page_url)
 
                 response = context.request.post(
                     page_url,
@@ -1335,18 +1342,15 @@ def career_it(page: int | None = None) -> list[dict[str, object]]:
                     timeout=TIMEOUT,
                 )
 
-                print(
-                    "Status:",
-                    response.status,
-                )
-
                 if not response.ok:
-                    print(
-                        f"Trang {page_number} "
-                        "request thất bại:"
-                    )
-                    print(
-                        response.text()[:500]
+                    logging.error(
+                        "[TopCV] Crawl trang %s/%s thất bại: HTTP %s, "
+                        "URL=%s, response=%r.",
+                        page_number,
+                        last_page,
+                        response.status,
+                        page_url,
+                        response.text()[:500],
                     )
                     continue
 
@@ -1356,13 +1360,16 @@ def career_it(page: int | None = None) -> list[dict[str, object]]:
                     )
 
                 except Exception as error:
-                    print(
-                        f"Trang {page_number} "
-                        "không trả JSON:"
-                    )
-                    print(error)
-                    print(
-                        response.text()[:500]
+                    logging.error(
+                        "[TopCV] Không thể đọc JSON trang %s/%s: %s. "
+                        "HTTP %s, URL=%s, response=%r.",
+                        page_number,
+                        last_page,
+                        error,
+                        response.status,
+                        page_url,
+                        response.text()[:500],
+                        exc_info=True,
                     )
                     continue
 
@@ -1396,10 +1403,6 @@ def career_it(page: int | None = None) -> list[dict[str, object]]:
                     response_data
                 )
 
-                print(
-                    f"Lấy được {len(page_jobs)} job"
-                )
-
                 for job in page_jobs:
                     job["source_page"] = (
                         page_number
@@ -1418,6 +1421,16 @@ def career_it(page: int | None = None) -> list[dict[str, object]]:
                             str(unique_key)
                         ] = job
 
+                logging.info(
+                    "[TopCV] Hoàn tất trang %s/%s: HTTP %s, lấy được %s job; "
+                    "tổng job không trùng hiện tại=%s.",
+                    page_number,
+                    last_page,
+                    response.status,
+                    len(page_jobs),
+                    len(all_jobs),
+                )
+
                 if page_number < last_page:
                     page.wait_for_timeout(
                         REQUEST_DELAY_MS
@@ -1431,36 +1444,46 @@ def career_it(page: int | None = None) -> list[dict[str, object]]:
                 all_jobs.values()
             )
 
-            print()
-            print(
-                "Tổng job không trùng:",
+            logging.info(
+                "[TopCV] Kết thúc phạm vi crawl trang 1-%s trên tổng %s trang: "
+                "%s job không trùng.",
+                last_page,
+                total_pages,
                 len(career),
             )
 
+            logging.info(
+                "[TopCV] Đang lưu %s job vào file CSV: %s.",
+                len(career),
+                OUTPUT_FILE,
+            )
             save_jobs_to_csv(
                 career,
                 OUTPUT_FILE,
             )
 
-            print(
-                "Đã lưu dữ liệu vào:",
+            logging.info(
+                "[TopCV] Đã lưu %s job vào file CSV: %s.",
+                len(career),
                 OUTPUT_FILE,
             )
 
         except PlaywrightTimeoutError as error:
-            print(
-                "Playwright chờ quá thời gian:"
+            logging.error(
+                "[TopCV] Playwright chờ quá thời gian tại URL=%s: %s.",
+                page.url,
+                error,
+                exc_info=True,
             )
-            print(error)
-            traceback.print_exc()
 
         except Exception as error:
-            print(
-                "Chương trình gặp lỗi:"
+            logging.error(
+                "[TopCV] Crawl gặp lỗi tại URL=%s (%s: %s).",
+                page.url,
+                type(error).__name__,
+                error,
+                exc_info=True,
             )
-            print(type(error).__name__)
-            print(error)
-            traceback.print_exc()
 
         finally:
             browser.close()
@@ -1468,6 +1491,10 @@ def career_it(page: int | None = None) -> list[dict[str, object]]:
     # Trả về toàn bộ job đã được biến đổi từ JSON. Nếu có lỗi sau khi đã
     # thu thập một phần dữ liệu, vẫn trả lại các job đã xử lý thành công.
     career = list(all_jobs.values())
+    logging.info(
+        "[TopCV] Kết thúc phiên crawl; trả về %s job đã xử lý.",
+        len(career),
+    )
     return career
 
 

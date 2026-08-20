@@ -15,12 +15,28 @@ from pyspark.sql import Row
 from pyspark.sql import SparkSession
 from pyspark.sql import functions as F
 import os
+from logging_config import logging, set_up_log
 from parse_job_ITviec import parse_partition
+
+LOG_COMPONENT = "[Spark][ITViec][driver]"
+set_up_log()
 
 run_date = datetime.now(timezone.utc).strftime("%Y-%m-%d")
 output_path = f"s3a://silver/ITViec/{run_date}"
 
 present=datetime.now()
+
+logging.info(
+    "%s Bắt đầu job chuyển dữ liệu Bronze sang Silver | "
+    "run_date=%s | source=%s | target_table=%s | target_location=%s | "
+    "ollama_partitions=%s.",
+    LOG_COMPONENT,
+    run_date,
+    f"s3a://bronze/itviec/{present.year}-{present.month}-{present.day}/",
+    "nessie.silver.itviec",
+    "s3a://warehouse/silver/itviec",
+    8,
+)
 
 spark = (
     SparkSession.builder
@@ -125,6 +141,14 @@ spark = (
 
     .getOrCreate()
 )
+logging.info(
+    "%s SparkSession đã sẵn sàng | app_name=%s | master=%s | "
+    "application_id=%s.",
+    LOG_COMPONENT,
+    spark.sparkContext.appName,
+    spark.sparkContext.master,
+    spark.sparkContext.applicationId,
+)
 parsed_schema = StructType([
     StructField("job_id", StringType(), False),
     StructField("min_salary", DoubleType(), True),
@@ -134,11 +158,28 @@ parsed_schema = StructType([
     StructField("parse_status", StringType(), False),
     ])
 
+logging.info(
+    "%s Bắt đầu tạo DataFrame nguồn từ Bronze | source=%s.",
+    LOG_COMPONENT,
+    f"s3a://bronze/itviec/{present.year}-{present.month}-{present.day}/",
+)
 data=spark.read.parquet(f"s3a://bronze/itviec/{present.year}-{present.month}-{present.day}/")
+logging.info(
+    "%s Đã tạo DataFrame nguồn từ Bronze theo cơ chế lazy của Spark | "
+    "columns=%s.",
+    LOG_COMPONENT,
+    ",".join(data.columns),
+)
 
 data_salary=data.select("job_id","salary")
 
 data_new=data_salary.repartition(8).rdd.mapPartitions(parse_partition)
+logging.info(
+    "%s Đã cấu hình bước chuẩn hóa salary bằng Ollama | partitions=%s | "
+    "lỗi từng job được lưu bằng parse_status=failed.",
+    LOG_COMPONENT,
+    8,
+)
 
 dataframe=spark.createDataFrame(
     data_new,
@@ -162,7 +203,20 @@ data_final=dataframe.join(
     on="job_id",
     how="inner"
 )
+logging.info(
+    "%s Đã cấu hình phép join dữ liệu salary với dữ liệu job | key=job_id | "
+    "join_type=inner.",
+    LOG_COMPONENT,
+)
+logging.info(
+    "%s Đang bảo đảm namespace Iceberg tồn tại | namespace=nessie.silver.",
+    LOG_COMPONENT,
+)
 spark.sql("CREATE NAMESPACE IF NOT EXISTS nessie.silver;")
+logging.info(
+    "%s Namespace Iceberg đã sẵn sàng | namespace=nessie.silver.",
+    LOG_COMPONENT,
+)
 
 data_final = data_final.withColumn(
     "scraped_at",
@@ -171,6 +225,12 @@ data_final = data_final.withColumn(
 
 data_final.createOrReplaceTempView("itviec_newjobs")
 
+logging.info(
+    "%s Đang bảo đảm bảng Iceberg tồn tại | table=%s | location=%s.",
+    LOG_COMPONENT,
+    "nessie.silver.itviec",
+    "s3a://warehouse/silver/itviec",
+)
 spark.sql("""
     CREATE TABLE IF NOT EXISTS nessie.silver.itviec (
         job_id STRING,
@@ -195,6 +255,18 @@ spark.sql("""
         'write.format.default' = 'parquet'
     );
 """)
+logging.info(
+    "%s Bảng Iceberg đã sẵn sàng | table=%s | location=%s.",
+    LOG_COMPONENT,
+    "nessie.silver.itviec",
+    "s3a://warehouse/silver/itviec",
+)
+logging.info(
+    "%s Bắt đầu MERGE dữ liệu vào Silver | source_view=itviec_newjobs | "
+    "target_table=%s | key=job_id.",
+    LOG_COMPONENT,
+    "nessie.silver.itviec",
+)
 spark.sql("""
     MERGE INTO nessie.silver.itviec AS target
     USING itviec_newjobs AS source
@@ -206,5 +278,12 @@ spark.sql("""
     WHEN NOT MATCHED THEN
         INSERT *
 """)
+logging.info(
+    "%s MERGE dữ liệu Silver hoàn tất | target_table=%s | key=job_id.",
+    LOG_COMPONENT,
+    "nessie.silver.itviec",
+)
 
+logging.info("%s Đang dừng SparkSession sau khi job hoàn tất.", LOG_COMPONENT)
 spark.stop()
+logging.info("%s Đã dừng SparkSession; job kết thúc thành công.", LOG_COMPONENT)

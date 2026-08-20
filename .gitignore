@@ -4,3 +4,5 @@ __pycache__/
 *.py[cod]
 .ipynb_checkpoints/
 pipeline_upload.log
+orchestration/logs/*
+!orchestration/logs/.gitkeep

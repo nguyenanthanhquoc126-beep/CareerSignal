@@ -12,6 +12,10 @@ import requests
 from pyspark.sql import Row
 from pyspark.sql import SparkSession
 from pyspark.sql import functions as F
+from logging_config import logging, set_up_log
+
+set_up_log()
+
 # Container Spark gọi Ollama đang chạy trên Windows host.
 OLLAMA_URL = "http://host.docker.internal:11434/api/chat"
 
@@ -442,6 +446,16 @@ Hãy phân tích tin tuyển dụng sau:
                 )
             except Exception as exc:
                 # Một job lỗi không làm mất cả partition.
+                logging.error(
+                    "[Spark][TopCV][executor][Ollama] Không thể phân loại job; "
+                    "job được giữ với parse_status=error | job_id=%s | "
+                    "model=%s | endpoint=%s | error_type=%s | error=%r.",
+                    job_id,
+                    MODEL_NAME,
+                    OLLAMA_URL,
+                    type(exc).__name__,
+                    exc,
+                )
                 yield Row(
                     job_id=job_id,
                     role_group=None,
@@ -456,6 +470,5 @@ Hãy phân tích tin tuyển dụng sau:
                 )
     finally:
         session.close()
-
 
 
