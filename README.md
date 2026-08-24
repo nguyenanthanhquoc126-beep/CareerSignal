@@ -236,7 +236,7 @@ Các cổng mặc định:
 Luồng chạy chính được khuyến nghị là chạy toàn bộ pipeline bằng Airflow. Các
 lệnh thủ công ở cuối phần này chỉ dùng để kiểm tra từng tầng khi có lỗi.
 
-### Bước 1: mở repository trong WSL và tạo môi trường Python
+### Bước 1: Mở repository trong WSL và tạo môi trường Python
 
 ```bash
 cd /mnt/c/Users/LEGION/CareerSignal
@@ -262,7 +262,7 @@ PySpark có sẵn trong Spark image; `requests` dành cho Spark executor nằm t
 `spark-jobs/docker/requirements.txt`; Airflow chạy trong image riêng của Docker
 Compose.
 
-### Bước 2: tạo file `.env`
+### Bước 2: Tạo file `.env`
 
 Tạo `.env` tại thư mục gốc và thay toàn bộ giá trị trong dấu `<...>`. Không
 commit file này.
@@ -312,7 +312,7 @@ pwd
 được từ WSL; nếu network WSL/Docker dùng địa chỉ khác thì cập nhật endpoint cho
 phù hợp.
 
-### Bước 3: khởi động SSH server trên WSL
+### Bước 3: Khởi động SSH server trên WSL
 
 Airflow dùng password-based `SSHOperator`, vì vậy WSL phải chạy OpenSSH server
 và cho phép user trong `.env` đăng nhập bằng mật khẩu.
@@ -334,7 +334,7 @@ docker ps
 SSH user phải đọc được repository, chạy được `.venv/bin/python`, mở Chromium
 qua `DISPLAY`/WSLg và gọi được Docker CLI mà không cần nhập mật khẩu `sudo`.
 
-### Bước 4: khởi động Ollama trên host
+### Bước 4: Khởi động Ollama trên host
 
 ```bash
 ollama pull qwen3.5:4b
@@ -351,7 +351,7 @@ curl -fsS http://localhost:11434/api/tags
 Spark worker gọi Ollama qua
 `http://host.docker.internal:11434/api/chat`.
 
-### Bước 5: build và khởi động Docker Compose
+### Bước 5: Build và khởi động Docker Compose
 
 Từ thư mục gốc của dự án:
 
@@ -371,7 +371,7 @@ Lần submit Spark đầu tiên sẽ tải Hadoop AWS, AWS SDK bundle và Iceber
 từ Maven. Ivy cache nằm trong container và có thể phải tải lại khi container
 được tạo lại.
 
-### Bước 6: kiểm tra kết nối trước khi trigger DAG
+### Bước 6: Kiểm tra kết nối trước khi trigger DAG
 
 Kiểm tra các service từ host:
 
@@ -401,7 +401,7 @@ docker compose exec airflow-scheduler \
 Nếu không thấy `career_signal_spark_pipeline`, kiểm tra log
 `airflow-dag-processor` và biến `CAREER_SIGNAL_ROOT`.
 
-### Bước 7: chạy pipeline bằng Airflow
+### Bước 7: Chạy pipeline bằng Airflow
 
 Mở `http://localhost:8081`, đăng nhập bằng tài khoản Airflow trong `.env`, tìm
 DAG `career_signal_spark_pipeline`, bật DAG rồi chọn **Trigger**.
@@ -425,7 +425,7 @@ ingestion → spark_itviec → spark_topcv → dbt_build
 Theo dõi trực tiếp trong Airflow UI ở phần **Task Instances**. Có thể bấm vào
 từng task để xem log, thời điểm bắt đầu, thời lượng và lỗi nếu task thất bại.
 
-### Bước 8: kiểm tra dữ liệu đầu ra
+### Bước 8: Kiểm tra dữ liệu đầu ra
 
 Sau khi `ingestion` hoàn tất, MinIO phải có:
 
