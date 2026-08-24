@@ -57,6 +57,8 @@ cd "{PROJECT_ROOT}" && \
     ),
     schedule="@daily",
     catchup=False,
+    max_active_runs=1,
+    max_active_tasks=1,
     tags=["career-signal", "spark"],
 )
 def career_signal_spark_pipeline():
@@ -66,6 +68,7 @@ def career_signal_spark_pipeline():
         ssh_conn_id="pipeline_server",
         command=INGESTION_COMMAND,
         cmd_timeout=None,
+        do_xcom_push=False
     )
 
     spark_itviec = SSHOperator(
@@ -73,6 +76,7 @@ def career_signal_spark_pipeline():
         ssh_conn_id="pipeline_server",
         command=SPARK_ITVIEC_COMMAND,
         cmd_timeout=None,
+        do_xcom_push=False
     )
 
     spark_topcv = SSHOperator(
@@ -80,6 +84,7 @@ def career_signal_spark_pipeline():
         ssh_conn_id="pipeline_server",
         command=SPARK_TOPCV_COMMAND,
         cmd_timeout=None,
+        do_xcom_push=False
     )
 
     dbt_build = SSHOperator(
@@ -87,10 +92,10 @@ def career_signal_spark_pipeline():
         ssh_conn_id="pipeline_server",
         command=DBT_BUILD_COMMAND,
         cmd_timeout=None,
+        do_xcom_push=False
     )
 
-    ingestion >> [spark_itviec, spark_topcv]
-    [spark_itviec, spark_topcv] >> dbt_build
+    ingestion >> spark_itviec >> spark_topcv >> dbt_build
 
 
 career_signal_spark_pipeline()
