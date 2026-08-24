@@ -231,42 +231,16 @@ Các cổng mặc định:
 | Trino | `http://localhost:8085` |
 | Ollama | `http://localhost:11434` |
 
-## Cấu hình
+## Hướng dẫn chạy dự án từ đầu
 
-Tạo file `.env` tại thư mục gốc. Không commit credential thật.
+Luồng chạy chính được khuyến nghị là chạy toàn bộ pipeline bằng Airflow. Các
+lệnh thủ công ở cuối phần này chỉ dùng để kiểm tra từng tầng khi có lỗi.
 
-```dotenv
-# MinIO
-MINIO_ROOT_USER=<minio-admin-user>
-MINIO_ROOT_PASSWORD=<minio-admin-password>
-MINIO_USER=<minio-user-for-ingestion>
-MINIO_PASSWORD=<minio-password-for-ingestion>
-
-# ITViec
-USER_NAME=<itviec-email>
-PASS_WORD=<itviec-password>
-
-# Airflow SSH connection tới WSL/host
-WSL_SSH_HOST=<wsl-host-address>
-WSL_SSH_USER=<wsl-user>
-WSL_SSH_PASSWORD=<wsl-password>
-CAREER_SIGNAL_ROOT=/absolute/path/to/CareerSignal
-
-# Airflow local
-AIRFLOW_UID=50000
-AIRFLOW_ADMIN_USERNAME=airflow
-AIRFLOW_ADMIN_PASSWORD=<airflow-admin-password>
-```
-
-`ingestion/main.py` hiện dùng MinIO endpoint hard-code
-`http://172.22.176.1:9000`. Nếu địa chỉ WSL/Windows host khác, cần cập nhật
-endpoint này trước khi chạy ingestion.
-
-## Cài đặt
-
-### 1. Cài dependency Python trên host
+### Bước 1: mở repository trong WSL và tạo môi trường Python
 
 ```bash
+cd /mnt/c/Users/LEGION/CareerSignal
+
 python3.11 -m venv .venv
 source .venv/bin/activate
 pip install --upgrade pip
@@ -274,40 +248,165 @@ pip install -r requirements.txt
 playwright install chromium
 ```
 
+Kiểm tra các chương trình chính trên host:
+
+```bash
+python --version
+dbt --version
+docker --version
+docker compose version
+```
+
 `requirements.txt` chỉ chứa dependency trực tiếp cho crawler và dbt trên host.
 PySpark có sẵn trong Spark image; `requests` dành cho Spark executor nằm trong
-`spark-jobs/docker/requirements.txt`; Airflow và provider chạy trong Airflow
-image của Docker Compose.
+`spark-jobs/docker/requirements.txt`; Airflow chạy trong image riêng của Docker
+Compose.
 
-### 2. Chuẩn bị Ollama
+### Bước 2: tạo file `.env`
+
+Tạo `.env` tại thư mục gốc và thay toàn bộ giá trị trong dấu `<...>`. Không
+commit file này.
+
+```dotenv
+# MinIO
+MINIO_ROOT_USER=<minio-user>
+MINIO_ROOT_PASSWORD=<minio-password>
+MINIO_USER=<same-minio-user>
+MINIO_PASSWORD=<same-minio-password>
+
+# Tài khoản đăng nhập ITViec
+USER_NAME=<itviec-email>
+PASS_WORD=<itviec-password>
+
+# Airflow SSH từ container tới WSL/host
+WSL_SSH_HOST=<wsl-address-reachable-from-docker>
+WSL_SSH_USER=<wsl-user>
+WSL_SSH_PASSWORD=<wsl-password>
+CAREER_SIGNAL_ROOT=/mnt/c/Users/LEGION/CareerSignal
+
+# Airflow local
+AIRFLOW_UID=<output-of-id-u>
+AIRFLOW_ADMIN_USERNAME=airflow
+AIRFLOW_ADMIN_PASSWORD=<airflow-admin-password>
+```
+
+Với cấu hình local mặc định, đặt `MINIO_USER` giống `MINIO_ROOT_USER` và
+`MINIO_PASSWORD` giống `MINIO_ROOT_PASSWORD`. Nếu muốn dùng user riêng, cần tạo
+user và policy ghi bucket trong MinIO trước.
+
+Lấy các giá trị WSL cần thiết bằng:
+
+```bash
+id -u
+whoami
+hostname -I
+pwd
+```
+
+`CAREER_SIGNAL_ROOT` phải là đường dẫn tuyệt đối mà SSH user truy cập được.
+`WSL_SSH_HOST` phải là IP/hostname mà container Airflow có thể kết nối tới cổng
+22, không nhất thiết là `localhost`.
+
+`ingestion/main.py` hiện dùng MinIO endpoint hard-code
+`http://172.22.176.1:9000`. Trước khi chạy, cần bảo đảm địa chỉ này truy cập
+được từ WSL; nếu network WSL/Docker dùng địa chỉ khác thì cập nhật endpoint cho
+phù hợp.
+
+### Bước 3: khởi động SSH server trên WSL
+
+Airflow dùng password-based `SSHOperator`, vì vậy WSL phải chạy OpenSSH server
+và cho phép user trong `.env` đăng nhập bằng mật khẩu.
+
+```bash
+sudo apt-get update
+sudo apt-get install -y openssh-server
+sudo service ssh start
+sudo service ssh status
+```
+
+Kiểm tra đăng nhập và quyền Docker ngay trên WSL:
+
+```bash
+ssh <wsl-user>@localhost
+docker ps
+```
+
+SSH user phải đọc được repository, chạy được `.venv/bin/python`, mở Chromium
+qua `DISPLAY`/WSLg và gọi được Docker CLI mà không cần nhập mật khẩu `sudo`.
+
+### Bước 4: khởi động Ollama trên host
 
 ```bash
 ollama pull qwen3.5:4b
+ollama serve
+```
+
+Nếu Ollama đã chạy như một service thì không cần chạy lại `ollama serve`. Kiểm
+tra model bằng một terminal khác:
+
+```bash
 curl -fsS http://localhost:11434/api/tags
 ```
 
-Spark worker gọi Ollama trên host qua
+Spark worker gọi Ollama qua
 `http://host.docker.internal:11434/api/chat`.
 
-### 3. Khởi động hạ tầng
+### Bước 5: build và khởi động Docker Compose
+
+Từ thư mục gốc của dự án:
 
 ```bash
-docker compose build spark-master spark-worker
-docker compose up -d
+docker compose up -d --build
 docker compose ps
 ```
+
+Chờ các service Airflow, PostgreSQL và Redis chuyển sang trạng thái healthy.
+Các service MinIO, Nessie, Spark và Trino phải ở trạng thái running.
+
+Mở MinIO Console tại `http://localhost:9001` và tạo bucket `warehouse` nếu
+bucket này chưa tồn tại. Bucket `bronze` sẽ được `ingestion.main` tự tạo ở lần
+chạy đầu tiên.
 
 Lần submit Spark đầu tiên sẽ tải Hadoop AWS, AWS SDK bundle và Iceberg runtime
 từ Maven. Ivy cache nằm trong container và có thể phải tải lại khi container
 được tạo lại.
 
-## Chạy pipeline
+### Bước 6: kiểm tra kết nối trước khi trigger DAG
 
-Mở Airflow tại `http://localhost:8081`, tìm DAG
-`career_signal_spark_pipeline`, unpause rồi trigger thủ công hoặc chờ lịch
-`@daily`.
+Kiểm tra các service từ host:
 
-Có thể thao tác bằng CLI:
+```bash
+curl -fsS http://localhost:19120/api/v2/config
+curl -fsS http://localhost:8085/v1/info
+curl -fsS http://localhost:11434/api/tags
+```
+
+Kiểm tra Spark worker gọi được Ollama:
+
+```bash
+docker compose exec spark-worker python3 -c \
+  "import requests; print(requests.get('http://host.docker.internal:11434/api/tags', timeout=10).status_code)"
+```
+
+Kiểm tra Airflow image có SSH provider và DAG được parse:
+
+```bash
+docker compose exec airflow-scheduler python -c \
+  "from airflow.providers.ssh.operators.ssh import SSHOperator; print('SSH provider: OK')"
+
+docker compose exec airflow-scheduler \
+  airflow dags list
+```
+
+Nếu không thấy `career_signal_spark_pipeline`, kiểm tra log
+`airflow-dag-processor` và biến `CAREER_SIGNAL_ROOT`.
+
+### Bước 7: chạy pipeline bằng Airflow
+
+Mở `http://localhost:8081`, đăng nhập bằng tài khoản Airflow trong `.env`, tìm
+DAG `career_signal_spark_pipeline`, bật DAG rồi chọn **Trigger**.
+
+Có thể thực hiện tương tự bằng CLI:
 
 ```bash
 docker compose exec airflow-scheduler \
@@ -317,21 +416,94 @@ docker compose exec airflow-scheduler \
   airflow dags trigger career_signal_spark_pipeline
 ```
 
-Airflow container phải đọc được biến `CAREER_SIGNAL_ROOT` và SSH connection
-`pipeline_server`. SSH user cần quyền truy cập repository, `.venv`, Docker
-daemon, browser display và các cổng local.
+Bốn task phải lần lượt chuyển sang trạng thái success:
 
-## Kiểm tra kết quả
-
-### Kiểm tra service
-
-```bash
-docker compose ps
-curl -fsS http://localhost:19120/api/v2/config
-curl -fsS http://localhost:8085/v1/info
+```text
+ingestion → spark_itviec → spark_topcv → dbt_build
 ```
 
-### Kiểm tra dbt
+Theo dõi trực tiếp trong Airflow UI ở phần **Task Instances**. Có thể bấm vào
+từng task để xem log, thời điểm bắt đầu, thời lượng và lỗi nếu task thất bại.
+
+### Bước 8: kiểm tra dữ liệu đầu ra
+
+Sau khi `ingestion` hoàn tất, MinIO phải có:
+
+```text
+bronze/itviec/YYYY-M-D/*.parquet
+bronze/topcv/YYYY-M-D/*.parquet
+```
+
+Sau hai Spark task và `dbt_build`, kiểm tra các bảng qua Trino CLI:
+
+```bash
+docker compose exec trino-coordinator trino --execute \
+  "SHOW TABLES FROM nessie.silver"
+
+docker compose exec trino-coordinator trino --execute \
+  "SHOW TABLES FROM nessie.gold"
+
+docker compose exec trino-coordinator trino --execute \
+  "SELECT COUNT(*) FROM nessie.silver.itviec"
+
+docker compose exec trino-coordinator trino --execute \
+  "SELECT COUNT(*) FROM nessie.silver.topcv"
+```
+
+Các bảng Silver mong đợi:
+
+```text
+nessie.silver.itviec
+nessie.silver.topcv
+```
+
+Các bảng Gold mong đợi:
+
+```text
+career_data_engineer
+skil_DE_need
+hiring_seniority
+Luong_trung_binh_IT
+phan_bo_viec_lam
+TheMostCVinData
+Trend_hiring
+```
+
+## Chạy từng tầng thủ công để debug
+
+Không chạy đồng thời các lệnh dưới đây với một DAG run đang hoạt động.
+
+### Chạy ingestion
+
+```bash
+DISPLAY="${DISPLAY:-:0}" .venv/bin/python -m ingestion.main
+```
+
+### Chạy Spark ITViec
+
+```bash
+docker compose exec -T spark-master /opt/spark/bin/spark-submit \
+  --master spark://spark-master:7077 \
+  --packages org.apache.hadoop:hadoop-aws:3.3.4,com.amazonaws:aws-java-sdk-bundle:1.12.262,org.apache.iceberg:iceberg-spark-runtime-3.5_2.12:1.5.0 \
+  --conf spark.jars.ivy=/tmp/.ivy2-itviec \
+  --conf spark.sql.extensions=org.apache.iceberg.spark.extensions.IcebergSparkSessionExtensions \
+  --py-files /opt/spark-jobs/parse_ITViec/parse_job_ITviec.py \
+  /opt/spark-jobs/parse_ITViec/parse_ITViec.py
+```
+
+### Chạy Spark TopCV
+
+```bash
+docker compose exec -T spark-master /opt/spark/bin/spark-submit \
+  --master spark://spark-master:7077 \
+  --packages org.apache.hadoop:hadoop-aws:3.3.4,com.amazonaws:aws-java-sdk-bundle:1.12.262,org.apache.iceberg:iceberg-spark-runtime-3.5_2.12:1.5.0 \
+  --conf spark.jars.ivy=/tmp/.ivy2-topcv \
+  --conf spark.sql.extensions=org.apache.iceberg.spark.extensions.IcebergSparkSessionExtensions \
+  --py-files /opt/spark-jobs/parse_topCV/parse_job_topCV.py,/opt/spark-jobs/parse_topCV/parse_salary_TOPCV.py \
+  /opt/spark-jobs/parse_topCV/parse_topcv.py
+```
+
+### Chạy dbt
 
 ```bash
 .venv/bin/dbt debug \
@@ -341,18 +513,6 @@ curl -fsS http://localhost:8085/v1/info
 .venv/bin/dbt build \
   --project-dir Careersignal_dbt \
   --profiles-dir Careersignal_dbt
-```
-
-### Kiểm tra bảng bằng Trino
-
-```sql
-SHOW SCHEMAS FROM nessie;
-SHOW TABLES FROM nessie.silver;
-SHOW TABLES FROM nessie.gold;
-
-SELECT COUNT(*) FROM nessie.silver.itviec;
-SELECT COUNT(*) FROM nessie.silver.topcv;
-SELECT * FROM nessie.gold.hiring_seniority;
 ```
 
 ## Quan sát và xử lý lỗi
