@@ -284,6 +284,7 @@ data_final = data_final.withColumn(
     "scraped_at",
     F.to_timestamp("scraped_at")
 )
+data_final = data_final.dropDuplicates(["job_id"])
 data_final.createOrReplaceTempView("topcv_newjobs")
 logging.info(
     "%s Đang bảo đảm namespace Iceberg tồn tại | namespace=nessie.silver.",

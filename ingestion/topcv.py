@@ -1,4 +1,3 @@
-import csv
 import json
 import re
 from datetime import datetime
@@ -44,8 +43,6 @@ IT_SEARCH_PARAMS = {
     "category_family": "r257",
     "saturday_status": "0",
 }
-
-OUTPUT_FILE = "topcv_it_jobs.csv"
 
 # Thời gian chờ tối đa của Playwright, tính bằng mili giây.
 TIMEOUT = 60_000
@@ -955,79 +952,7 @@ def get_total_pages_from_dom(page):
 
 
 # ============================================================
-# 10. LƯU DANH SÁCH CÔNG VIỆC VÀO CSV
-# ============================================================
-
-def save_jobs_to_csv(jobs, output_file):
-    """
-    Mỗi công việc được ghi thành một dòng trong CSV.
-    """
-
-    fieldnames = [
-        "job_id",
-        "source_page",
-        "position",
-        "tracking_id",
-        "box_type",
-        "title",
-        "company_name",
-        "salary",
-        "city",
-        "experience",
-        "posted_time",
-        "updated_time",
-        "job_url",
-        "company_url",
-        "logo_url",
-        "apply_text",
-        "apply_url",
-        "labels",
-        "visible_tags",
-        "remaining_tags",
-        "is_hot",
-        "is_urgent",
-        "is_pro_company",
-        "is_verified",
-        "verification_level",
-        "is_highlight",
-        "is_flash_job",
-        "is_diamond_employer",
-        "scraped_at",
-    ]
-
-    with open(
-        output_file,
-        mode="w",
-        newline="",
-        encoding="utf-8",
-    ) as csv_file:
-
-        writer = csv.DictWriter(
-            csv_file,
-            fieldnames=fieldnames,
-            extrasaction="ignore",
-        )
-
-        writer.writeheader()
-
-        for job in jobs:
-            row = job.copy()
-
-            row["labels"] = json.dumps(
-                job.get("labels", []),
-                ensure_ascii=False,
-            )
-
-            row["visible_tags"] = json.dumps(
-                job.get("visible_tags", []),
-                ensure_ascii=False,
-            )
-
-            writer.writerow(row)
-
-
-# ============================================================
-# 11. HÀM CHÍNH: THU THẬP VIỆC LÀM IT TOÀN QUỐC
+# 10. HÀM CHÍNH: THU THẬP VIỆC LÀM IT TOÀN QUỐC
 # ============================================================
 
 def career_it(page: int | None = None) -> list[dict[str, object]]:
@@ -1043,7 +968,7 @@ def career_it(page: int | None = None) -> list[dict[str, object]]:
     7. Bóc html_job bằng BeautifulSoup.
     8. Dùng URL request thật để lấy tối đa ``page`` trang.
     9. Kiểm tra current_page.
-    10. Loại trùng, lưu CSV và trả về toàn bộ kết quả trong biến career.
+    10. Loại trùng và trả về toàn bộ kết quả trong biến career.
 
     Nếu ``page`` là None, hàm cào toàn bộ số trang server trả về.
     Số trang thực tế luôn bằng ``min(page, total_pages)``.
@@ -1080,7 +1005,7 @@ def career_it(page: int | None = None) -> list[dict[str, object]]:
 
         try:
             # ------------------------------------------------
-            # 11.1. Mở trang chủ TopCV
+            # 10.1. Mở trang chủ TopCV
             # ------------------------------------------------
 
             page.goto(
@@ -1097,7 +1022,7 @@ def career_it(page: int | None = None) -> list[dict[str, object]]:
             )
 
             # ------------------------------------------------
-            # 11.2. Hover menu “Việc làm”
+            # 10.2. Hover menu “Việc làm”
             # ------------------------------------------------
 
             job_menu = first_visible(
@@ -1113,7 +1038,7 @@ def career_it(page: int | None = None) -> list[dict[str, object]]:
             logging.info("[TopCV] Đã mở menu Việc làm.")
 
             # ------------------------------------------------
-            # 11.3. Tìm link “Việc làm IT”
+            # 10.3. Tìm link “Việc làm IT”
             # ------------------------------------------------
 
             it_job_link = first_visible(
@@ -1130,7 +1055,7 @@ def career_it(page: int | None = None) -> list[dict[str, object]]:
             )
 
             # ------------------------------------------------
-            # 11.4. Vào trang IT rồi chủ động gọi POST JSON
+            # 10.4. Vào trang IT rồi chủ động gọi POST JSON
             # ------------------------------------------------
             it_job_link.click()
 
@@ -1183,7 +1108,7 @@ def career_it(page: int | None = None) -> list[dict[str, object]]:
             )
 
             # ------------------------------------------------
-            # 11.5. Kiểm tra response đầu
+            # 10.5. Kiểm tra response đầu
             # ------------------------------------------------
 
             if not first_response.ok:
@@ -1273,7 +1198,7 @@ def career_it(page: int | None = None) -> list[dict[str, object]]:
                 )
 
             # ------------------------------------------------
-            # 11.6. Bóc công việc trang đầu
+            # 10.6. Bóc công việc trang đầu
             # ------------------------------------------------
 
             first_page_jobs = parse_jobs(
@@ -1308,7 +1233,7 @@ def career_it(page: int | None = None) -> list[dict[str, object]]:
             )
 
             # ------------------------------------------------
-            # 11.7. Lấy header và URL từ request thật
+            # 10.7. Lấy header và URL từ request thật
             # ------------------------------------------------
 
             logging.info(
@@ -1317,7 +1242,7 @@ def career_it(page: int | None = None) -> list[dict[str, object]]:
             )
 
             # ------------------------------------------------
-            # 11.8. Lấy trang 2 đến giới hạn đã yêu cầu
+            # 10.8. Lấy trang 2 đến giới hạn đã yêu cầu
             # ------------------------------------------------
 
             for page_number in range(
@@ -1437,7 +1362,7 @@ def career_it(page: int | None = None) -> list[dict[str, object]]:
                     )
 
             # ------------------------------------------------
-            # 11.9. Lưu kết quả
+            # 10.9. Tổng hợp kết quả (không ghi file)
             # ------------------------------------------------
 
             career = list(
@@ -1450,22 +1375,6 @@ def career_it(page: int | None = None) -> list[dict[str, object]]:
                 last_page,
                 total_pages,
                 len(career),
-            )
-
-            logging.info(
-                "[TopCV] Đang lưu %s job vào file CSV: %s.",
-                len(career),
-                OUTPUT_FILE,
-            )
-            save_jobs_to_csv(
-                career,
-                OUTPUT_FILE,
-            )
-
-            logging.info(
-                "[TopCV] Đã lưu %s job vào file CSV: %s.",
-                len(career),
-                OUTPUT_FILE,
             )
 
         except PlaywrightTimeoutError as error:
@@ -1499,7 +1408,7 @@ def career_it(page: int | None = None) -> list[dict[str, object]]:
 
 
 # ============================================================
-# 12. CHỈ CHẠY KHI FILE ĐƯỢC THỰC THI TRỰC TIẾP
+# 11. CHỈ CHẠY KHI FILE ĐƯỢC THỰC THI TRỰC TIẾP
 # ============================================================
 
 if __name__ == "__main__":

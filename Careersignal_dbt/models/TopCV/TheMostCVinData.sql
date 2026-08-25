@@ -7,4 +7,4 @@ WHERE experience_years IS NOT NULL
   AND primary_role IS NOT NULL 
   AND LOWER(primary_role) LIKE '%data%'
 GROUP BY primary_role
-ORDER BY avg_experience_years 
+ORDER BY total_jobs DESC

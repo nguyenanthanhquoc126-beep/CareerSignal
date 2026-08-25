@@ -47,6 +47,12 @@ cd "{PROJECT_ROOT}" && \
 """
 
 
+SEND_MESSAGE_WEBHOOK_COMMAND = f"""
+cd "{PROJECT_ROOT}" && \
+"{PROJECT_ROOT}/.venv/bin/python" -m Send_message_webhook
+"""
+
+
 @dag(
     dag_id="career_signal_spark_pipeline",
     start_date=pendulum.datetime(
@@ -95,7 +101,15 @@ def career_signal_spark_pipeline():
         do_xcom_push=False
     )
 
-    ingestion >> spark_itviec >> spark_topcv >> dbt_build
+    send_message_webhook = SSHOperator(
+        task_id="send_message_webhook",
+        ssh_conn_id="pipeline_server",
+        command=SEND_MESSAGE_WEBHOOK_COMMAND,
+        cmd_timeout=None,
+        do_xcom_push=False
+    )
+
+    ingestion >> spark_itviec >> spark_topcv >> dbt_build >> send_message_webhook
 
 
 career_signal_spark_pipeline()

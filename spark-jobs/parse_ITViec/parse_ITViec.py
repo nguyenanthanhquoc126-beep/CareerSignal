@@ -223,6 +223,8 @@ data_final = data_final.withColumn(
     F.to_timestamp("scraped_at")
 )
 
+data_final = data_final.dropDuplicates(["job_id"])
+
 data_final.createOrReplaceTempView("itviec_newjobs")
 
 logging.info(

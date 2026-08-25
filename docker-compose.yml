@@ -102,7 +102,6 @@ services:
         networks:
             - data-lakehouse
 
-
     spark-master:
         build:
             context: ./spark-jobs/docker
