@@ -2,6 +2,8 @@ import requests
 import trino
 from datetime import date
 import os
+from dotenv import load_dotenv
+load_dotenv()
 
 WEBHOOK_URL = os.getenv('WEBHOOK_URL')
 
